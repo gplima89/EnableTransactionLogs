@@ -64,13 +64,13 @@ while ($Skip -lt $TotalAZGraph) {
     $Query += $QueryTemp
     $Skip += 1000
 }
+
 $Query = $Query | Sort-Object -Property subscriptionId
 
-# Setting up Log Configuration for Transaction Logs
-$metric = New-AzDiagnosticSettingMetricSettingsObject -Enabled $true -Category "Transaction" -RetentionPolicyEnabled $true
-
+# Loop through the storage accounts
 foreach ($StgAcct in $Query)
 {
+    # Setting context
     $SubscriptionId = $StgAcct.subscriptionId
     if ($Context -ne $SubscriptionId)
     {
@@ -85,11 +85,29 @@ foreach ($StgAcct in $Query)
     # Enable diagnostic settings for transaction logs
     $storageAccountName = $storageAccount.StorageAccountName
     $resourceId = $storageAccount.Id
+    
+    $Ids = @(
+        $resourceId + "/blobServices/default"
+        $resourceId + "/fileServices/default"
+        $resourceId + "/queueServices/default"
+        $resourceId + "/tableServices/default"
+    )
 
-    $DiagSetting = Get-AzDiagnosticSetting -ResourceId $resourceId
-    if ($DiagSetting.Name -notlike $DiagnosticSettingsName)
-    {
-        New-AzDiagnosticSetting -Name $DiagnosticSettingsName -ResourceId $resourceId -WorkspaceId $logAnalyticsWorkspaceId -Metric $metric
-        Write-Output "Enabled transaction logs for storage account: $storageAccountName and being stored in Log Analytics workspace: $LAWName"
+    # Enable diagnostic settings for transaction logs
+    $Ids | ForEach-Object {
+        $log = @()
+        $DiagSetting = Get-AzDiagnosticSetting -ResourceId $_
+        $categories = Get-AzDiagnosticSettingCategory -ResourceId $_
+        if ($DiagSetting.Name -notlike $DiagnosticSettingsName)
+        {
+            foreach ($category in $categories) {
+                if ($category.CategoryType -eq "Logs")
+                {
+                    $log += New-AzDiagnosticSettingLogSettingsObject -Enabled $true -Category $category.Name -RetentionPolicyEnabled $true
+                } 
+            }
+            New-AzDiagnosticSetting -Name $DiagnosticSettingsName -ResourceId $_ -WorkspaceId $logAnalyticsWorkspaceId -Log $log
+            Write-Output "Enabled logs for storage account: $storageAccountName and being stored in Log Analytics workspace: $LAWName"
+        }
     }
 }
